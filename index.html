@@ -896,8 +896,8 @@ canvas.matchpic { height: 90px; width: 100%; image-rendering: pixelated; margin-
     if (typeof guideLive === "function") guideLive();
     var t = tiles[cc];
     if (t) {
-      t.v.textContent = v;
-      t.bar.style.width = (v / 127 * 100) + "%";
+      t.v.textContent = cc === 14 ? "R " + ["64","32","16","8","4","2"][Math.max(0, Math.min(5, v))] : v;
+      t.bar.style.width = (cc === 14 ? Math.min(v / 5, 1) * 100 : v / 127 * 100) + "%";
       t.el.classList.add("seen");
       if (fromS1) {
         t.slider.value = v;
@@ -1811,9 +1811,19 @@ canvas.matchpic { height: 90px; width: 100%; image-rendering: pixelated; margin-
       S("The two oscillator level knobs are labelled by waveform: the square-icon knob sits next to SUB and the saw-icon knob sits next to NOISE.")
     ] },
     { id: "b-save", cat: "basics", lvl: 1, title: "Keeping what you make", blurb: "Apply the knobs to a sound, save the pattern, record the result.", steps: [
-      S("SHIFT + HOLD applies the current knob positions to the pattern's sound.", [], ["SHIFT + HOLD"]),
-      S("Press SHIFT + pad 16 (WRITE) to save the pattern.", [], ["SHIFT + pad 16 (WRITE)"]),
-      S("Capture the sound as audio: connect the S-1 USB audio input in the Sound tab, then press REC on the Rec tab. The WAV stays on your phone.", [], [], "Record each drum hit or note as its own take to build your own sample set.")
+      S("On the S-1, every pattern keeps its own sound. A sound is saved together with the pattern it belongs to, so first pick which pattern will hold it: hold PATTERN, press a bank pad (1 to 4), let go, then press a number pad (1 to 16). Choose a pattern you are happy to overwrite.", [], ["Hold PATTERN + bank pad 1-4, then number pad 1-16"]),
+      S("Make the sound with the knobs. Then press SHIFT + HOLD. This copies the current knob positions into the sound of the selected pattern. Only the top panel knobs are copied. Settings made by holding SHIFT with a knob are not.", [], ["SHIFT + HOLD"], "If you skip this step, the knob positions are not stored in the pattern."),
+      S("Save it. Hold SHIFT and press pad 16 (WRITE). Turn the TEMPO/VALUE knob to Ptn (just this pattern) or ALL (every pattern), then press pad 2 (ENTER). The display shows donE when it has saved.", [], ["SHIFT + pad 16 (WRITE)", "TEMPO/VALUE: Ptn", "Pad 2 (ENTER)"], "Anything you do not save is lost when you turn the S-1 off. It returns to the last saved version."),
+      S("To get it back later, select the same pattern with PATTERN + bank pad + number pad.", [], ["Hold PATTERN + bank pad, then number pad"]),
+      S("To keep the sound as audio as well, record it in the Rec tab. The WAV file stays on your phone.", [], [], "Record each note or drum hit as its own take to build your own sample set.")
+    ] },
+    { id: "b-rec", cat: "basics", lvl: 1, title: "Recording clean audio", blurb: "Get a quiet, clear recording from the S-1.", steps: [
+      S("The app records exactly what the chosen audio input hears and does not add or remove noise. A noisy recording almost always means the wrong input was chosen.", [], []),
+      S("Go to the Sound tab and choose the S-1's own audio input from the audio input list (it may be named Roland S-1 or USB audio). Do not use the phone microphone. The microphone picks up the room, the speaker and any hiss.", [], ["Sound tab: pick the S-1 as audio input"]),
+      S("Check the scope on the Sound tab before you record. With nothing playing it should be almost flat. If you see lots of fuzz, the input is wrong or the cable or hub is faulty.", [], []),
+      S("Set the S-1 level. If the meter hits the top, turn the S-1 volume down to stop clipping. If it barely moves, turn it up.", [], [], "Aim for the meter to peak about halfway to three quarters."),
+      S("Use a direct USB-C cable from the S-1 to the phone, with no cheap hub. Keep the phone away from the S-1's speaker if you are not using the USB input.", [], []),
+      S("High resonance, a lot of noise level or delay and reverb on the S-1 will also sound hissy. Turn them down and compare.", [[23, 0], [71, 20]], [], "If it is clean now, add them back one at a time.")
     ] },
 
     // ---------- Bass ----------
@@ -2091,6 +2101,9 @@ canvas.matchpic { height: 90px; width: 100%; image-rendering: pixelated; margin-
     }
     return k;
   }
+  // OSC RANGE (CC14) is a stepped knob: the S-1 sends small numbers (about 0 to 5), not 0 to 127.
+  var RFEET = ["64'", "32'", "16'", "8'", "4'", "2'"];
+  function rangePos(pct) { return pct < 5 ? 0 : pct < 14 ? 1 : pct < 30 ? 2 : pct < 45 ? 3 : pct < 70 ? 4 : 5; }
   function oclock(p) {
     var h = Math.round(7 + p / 10);
     if (h > 12) h -= 12;
@@ -2106,10 +2119,12 @@ canvas.matchpic { height: 90px; width: 100%; image-rendering: pixelated; margin-
   function renderRows(host, rows) {
     rows.forEach(function (r) {
       var k = r[0], tgt = Math.round(r[1]);
+      var tpos = -1;
+      if (k === 14) { tpos = rangePos(tgt); tgt = tpos * 20; }
       var row = el("div", "krow");
       var top = el("div", "ktop");
       top.appendChild(el("span", "kname", KNOB[k] || ("CC " + k)));
-      top.appendChild(el("span", "ktgt", tgt + "% (" + oclock(tgt) + ")"));
+      top.appendChild(el("span", "ktgt", tpos >= 0 ? "R " + RFEET[tpos].replace("'", "") + " (" + RFEET[tpos] + ")" : tgt + "% (" + oclock(tgt) + ")"));
       var bar = el("div", "kbar");
       var fill = el("i", "kf");
       var mark = el("b", "kt");
@@ -2119,7 +2134,7 @@ canvas.matchpic { height: 90px; width: 100%; image-rendering: pixelated; margin-
       row.appendChild(top); row.appendChild(bar); row.appendChild(st);
       if (r[2]) row.appendChild(el("div", "knote", r[2]));
       host.appendChild(row);
-      liveRows.push({ k: k, tgt: tgt, fill: fill, st: st, row: row });
+      liveRows.push({ k: k, tgt: tgt, tpos: tpos, fill: fill, st: st, row: row });
     });
   }
 
@@ -2129,6 +2144,13 @@ canvas.matchpic { height: 90px; width: 100%; image-rendering: pixelated; margin-
       if (!document.body.contains(r.row)) { liveRows.splice(i, 1); continue; }
       var v = vals[ccFor(r.k)];
       if (v === undefined) { r.fill.style.width = "0%"; r.row.classList.remove("ok"); r.st.textContent = "Turn the knob to see it here"; continue; }
+      if (r.k === 14) {
+        var pos = clampN(Math.round(v), 0, 5);
+        r.fill.style.width = (pos / 5 * 100) + "%";
+        if (pos === r.tpos) { r.row.classList.add("ok"); r.st.textContent = "On target (R " + RFEET[pos].replace("'", "") + ")"; }
+        else { r.row.classList.remove("ok"); r.st.textContent = (pos > r.tpos ? "Turn down" : "Turn up") + " (now R " + RFEET[pos].replace("'", "") + ")"; }
+        continue;
+      }
       var p = v / 127 * 100;
       r.fill.style.width = p + "%";
       var d = p - r.tgt;
