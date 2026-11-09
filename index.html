@@ -447,6 +447,7 @@ canvas.matchpic { height: 90px; width: 100%; image-rendering: pixelated; margin-
     </div>
     <div class="vu"><i id="vuFill"></i></div>
     <div class="field" style="margin-top:12px"><label for="recGain">Recording level <span id="recGainV">100%</span></label><input type="range" id="recGain" min="5" max="100" value="100" style="width:100%"></div>
+    <label class="switch small" for="recNorm" style="margin-top:10px"><input type="checkbox" id="recNorm" checked><span>Raise quiet recordings to a good level when saving</span></label>
     <div class="small muted" id="recStatus">Ready. Pressing REC starts the audio input if it is off.</div>
   </section>
   <section class="card" aria-labelledby="h-takes">
@@ -1471,14 +1472,14 @@ canvas.matchpic { height: 90px; width: 100%; image-rendering: pixelated; margin-
 
   // ===================== Recorder: S-1 audio to WAV files kept on the phone =====================
   var srcNode = null;
-  var REC_MAX_S = 600;
+  var REC_MAX_S = 240;
   var recNode = null, recMute = null, recChunks = [], recFrames = 0, recOn = false, recTimer = 0, recRate = 48000;
   var wakeLock = null, takeUrls = [], memTakes = [], memId = 1, clipUntil = 0;
   var recGainNode = null, recPeak = 0, recClipped = 0;
 
   var WORKLET_SRC = [
     "class S1Rec extends AudioWorkletProcessor {",
-    "  constructor() { super(); this.on = false; this.size = 8192; this.buf = new Int16Array(this.size); this.pos = 0;",
+    "  constructor() { super(); this.on = false; this.size = 8192; this.buf = new Float32Array(this.size); this.pos = 0;",
     "    this.port.onmessage = (e) => {",
     "      if (e.data.cmd === 'start') { this.on = true; this.pos = 0; }",
     "      else if (e.data.cmd === 'stop') { this.on = false; this.flush(); this.port.postMessage({ done: true }); }",
@@ -1492,8 +1493,8 @@ canvas.matchpic { height: 90px; width: 100%; image-rendering: pixelated; margin-
     "    for (let i = 0; i < n; i++) {",
     "      let a = l[i], b = r[i];",
     "      a = a < -1 ? -1 : a > 1 ? 1 : a; b = b < -1 ? -1 : b > 1 ? 1 : b;",
-    "      this.buf[this.pos++] = a < 0 ? a * 32768 : a * 32767;",
-    "      this.buf[this.pos++] = b < 0 ? b * 32768 : b * 32767;",
+    "      this.buf[this.pos++] = a;",
+    "      this.buf[this.pos++] = b;",
     "      if (this.pos >= this.size) this.flush();",
     "    }",
     "    return true;",
@@ -1546,9 +1547,19 @@ canvas.matchpic { height: 90px; width: 100%; image-rendering: pixelated; margin-
   }
   function setRecStatus(t) { $("recStatus").textContent = t; }
 
-  function makeWav(chunks, rate, ch) {
-    var bytes = 0;
-    chunks.forEach(function (c) { bytes += c.length * 2; });
+  // The take is kept as 32-bit float while recording, then written as 16-bit with a little dither.
+  function makeWav(fchunks, rate, ch, gain) {
+    var bytes = 0, chunks = [];
+    gain = gain || 1;
+    fchunks.forEach(function (c) {
+      var o = new Int16Array(c.length);
+      for (var i = 0; i < c.length; i++) {
+        var v = c[i] * gain * 32767 + (Math.random() - Math.random());
+        o[i] = v < -32768 ? -32768 : v > 32767 ? 32767 : Math.round(v);
+      }
+      chunks.push(o);
+      bytes += o.length * 2;
+    });
     var h = new DataView(new ArrayBuffer(44));
     function str(o, t) { for (var i = 0; i < t.length; i++) h.setUint8(o + i, t.charCodeAt(i)); }
     str(0, "RIFF"); h.setUint32(4, 36 + bytes, true); str(8, "WAVE"); str(12, "fmt ");
@@ -1562,7 +1573,7 @@ canvas.matchpic { height: 90px; width: 100%; image-rendering: pixelated; margin-
   function onRecData(ev) {
     var d = ev.data;
     if (d && d.done) { finalizeTake(); return; }
-    var arr = new Int16Array(d);
+    var arr = new Float32Array(d);
     measure(arr);
     recChunks.push(arr);
     recFrames += arr.length / 2;
@@ -1573,7 +1584,7 @@ canvas.matchpic { height: 90px; width: 100%; image-rendering: pixelated; margin-
     for (var i = 0; i < arr.length; i++) {
       var v = arr[i] < 0 ? -arr[i] : arr[i];
       if (v > recPeak) recPeak = v;
-      if (v >= 32700) recClipped++;
+      if (v >= 0.9995) recClipped++;
     }
   }
 
@@ -1604,11 +1615,10 @@ canvas.matchpic { height: 90px; width: 100%; image-rendering: pixelated; margin-
       if (!recOn) return;
       var l = ev.inputBuffer.getChannelData(0);
       var r = ev.inputBuffer.numberOfChannels > 1 ? ev.inputBuffer.getChannelData(1) : l;
-      var out = new Int16Array(l.length * 2);
+      var out = new Float32Array(l.length * 2);
       for (var i = 0; i < l.length; i++) {
-        var a = Math.max(-1, Math.min(1, l[i])), b = Math.max(-1, Math.min(1, r[i]));
-        out[i * 2] = a < 0 ? a * 32768 : a * 32767;
-        out[i * 2 + 1] = b < 0 ? b * 32768 : b * 32767;
+        out[i * 2] = Math.max(-1, Math.min(1, l[i]));
+        out[i * 2 + 1] = Math.max(-1, Math.min(1, r[i]));
       }
       measure(out);
       recChunks.push(out);
@@ -1664,14 +1674,17 @@ canvas.matchpic { height: 90px; width: 100%; image-rendering: pixelated; margin-
   function finalizeTake() {
     var frames = recFrames;
     if (!frames) { setRecStatus("Nothing was recorded."); return; }
-    var wav = makeWav(recChunks, recRate, 2);
+    var norm = $("recNorm").checked && recPeak > 0.0005;
+    var gain = norm ? Math.min(0.89 / recPeak, 100) : 1;
+    var wav = makeWav(recChunks, recRate, 2, gain);
     var created = new Date();
     var rec = { name: takeName(created), created: created.getTime(), dur: frames / recRate, rate: recRate, size: wav.size, blob: wav };
     recChunks = []; recFrames = 0;
     $("recTime").textContent = fmtTime(rec.dur);
-    var pk = recPeak > 0 ? Math.round(20 * Math.log(recPeak / 32768) / Math.LN10 * 10) / 10 : -99;
+    var pk = recPeak > 0 ? Math.round(20 * Math.log(recPeak) / Math.LN10 * 10) / 10 : -99;
     var msg = "Saved " + rec.name + ". Loudest point " + pk + " dB.";
     if (recClipped > 20) msg += " It hit the top (" + recClipped + " samples), so it will sound harsh. Turn the S-1 volume or the Recording level down and record again.";
+    else if (norm && gain > 2) msg += " The signal was quiet, so it was raised by " + Math.round(20 * Math.log(gain) / Math.LN10) + " dB to a good level.";
     else if (pk < -30) msg += " Very quiet. Turn the S-1 volume or the Recording level up.";
     takeAdd(rec).then(function () { setRecStatus(msg); renderTakes(); });
   }
