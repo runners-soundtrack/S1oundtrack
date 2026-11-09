@@ -899,7 +899,7 @@ canvas.matchpic { height: 90px; width: 100%; image-rendering: pixelated; margin-
     var t = tiles[cc];
     if (t) {
       t.v.textContent = cc === 14 ? "R " + ["64","32","16","8","4","2"][Math.max(0, Math.min(5, v))] : v;
-      t.bar.style.width = (cc === 14 ? Math.min(v / 5, 1) * 100 : v / 127 * 100) + "%";
+      t.bar.style.width = (cc === 14 ? Math.min(v / 5, 1) * 100 : Math.min(v / (CCMAX[cc] || 127), 1) * 100) + "%";
       t.el.classList.add("seen");
       if (fromS1) {
         t.slider.value = v;
@@ -2138,6 +2138,8 @@ canvas.matchpic { height: 90px; width: 100%; image-rendering: pixelated; margin-
     return k;
   }
   // OSC RANGE (CC14) is a stepped knob: the S-1 sends small numbers (about 0 to 5), not 0 to 127.
+  // Some knobs send a smaller top value than 127. LFO RATE (CC3) tops out at 31.
+  var CCMAX = { 3: 31 };
   var RFEET = ["64'", "32'", "16'", "8'", "4'", "2'"];
   function rangePos(pct) { return pct < 5 ? 0 : pct < 14 ? 1 : pct < 30 ? 2 : pct < 45 ? 3 : pct < 70 ? 4 : 5; }
   function oclock(p) {
@@ -2187,7 +2189,7 @@ canvas.matchpic { height: 90px; width: 100%; image-rendering: pixelated; margin-
         else { r.row.classList.remove("ok"); r.st.textContent = (pos > r.tpos ? "Turn down" : "Turn up") + " (now R " + RFEET[pos].replace("'", "") + ")"; }
         continue;
       }
-      var p = v / 127 * 100;
+      var p = Math.min(v / (CCMAX[r.k] || 127), 1) * 100;
       r.fill.style.width = p + "%";
       var d = p - r.tgt;
       if (Math.abs(d) <= 12) { r.row.classList.add("ok"); r.st.textContent = "On target (" + Math.round(p) + "%)"; }
