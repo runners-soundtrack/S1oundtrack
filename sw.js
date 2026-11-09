@@ -1,5 +1,5 @@
 // Keeps the app available offline. Network first, so a new version arrives as soon as you are online.
-var CACHE = "runners-s1oundtrack-v9";
+var CACHE = "runners-s1oundtrack-v10";
 var SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-512-maskable.png", "./fonts/press-start-2p.woff2", "./fonts/vt323.woff2"];
 
 self.addEventListener("install", function (e) {
