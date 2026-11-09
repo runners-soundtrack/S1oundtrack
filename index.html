@@ -446,6 +446,7 @@ canvas.matchpic { height: 90px; width: 100%; image-rendering: pixelated; margin-
       <span class="rectime" id="recTime">00:00</span>
     </div>
     <div class="vu"><i id="vuFill"></i></div>
+    <div class="field" style="margin-top:12px"><label for="recGain">Recording level <span id="recGainV">100%</span></label><input type="range" id="recGain" min="5" max="100" value="100" style="width:100%"></div>
     <div class="small muted" id="recStatus">Ready. Pressing REC starts the audio input if it is off.</div>
   </section>
   <section class="card" aria-labelledby="h-takes">
@@ -1473,6 +1474,7 @@ canvas.matchpic { height: 90px; width: 100%; image-rendering: pixelated; margin-
   var REC_MAX_S = 600;
   var recNode = null, recMute = null, recChunks = [], recFrames = 0, recOn = false, recTimer = 0, recRate = 48000;
   var wakeLock = null, takeUrls = [], memTakes = [], memId = 1, clipUntil = 0;
+  var recGainNode = null, recPeak = 0, recClipped = 0;
 
   var WORKLET_SRC = [
     "class S1Rec extends AudioWorkletProcessor {",
@@ -1561,9 +1563,18 @@ canvas.matchpic { height: 90px; width: 100%; image-rendering: pixelated; margin-
     var d = ev.data;
     if (d && d.done) { finalizeTake(); return; }
     var arr = new Int16Array(d);
+    measure(arr);
     recChunks.push(arr);
     recFrames += arr.length / 2;
     if (recOn && recFrames / recRate >= REC_MAX_S) stopRecording();
+  }
+
+  function measure(arr) {
+    for (var i = 0; i < arr.length; i++) {
+      var v = arr[i] < 0 ? -arr[i] : arr[i];
+      if (v > recPeak) recPeak = v;
+      if (v >= 32700) recClipped++;
+    }
   }
 
   function prepareRecorder() {
@@ -1571,7 +1582,10 @@ canvas.matchpic { height: 90px; width: 100%; image-rendering: pixelated; margin-
     function wire(node) {
       recMute = AC.createGain();
       recMute.gain.value = 0;
-      srcNode.connect(node);
+      recGainNode = AC.createGain();
+      recGainNode.gain.value = ($("recGain").value || 100) / 100;
+      srcNode.connect(recGainNode);
+      recGainNode.connect(node);
       node.connect(recMute);
       recMute.connect(AC.destination);
       recNode = node;
@@ -1596,6 +1610,7 @@ canvas.matchpic { height: 90px; width: 100%; image-rendering: pixelated; margin-
         out[i * 2] = a < 0 ? a * 32768 : a * 32767;
         out[i * 2 + 1] = b < 0 ? b * 32768 : b * 32767;
       }
+      measure(out);
       recChunks.push(out);
       recFrames += l.length;
       if (recFrames / recRate >= REC_MAX_S) stopRecording();
@@ -1622,7 +1637,7 @@ canvas.matchpic { height: 90px; width: 100%; image-rendering: pixelated; margin-
     var go = function () {
       if (!running || !AC || !srcNode) { setRecStatus("Could not open the audio input. Check the Sound tab."); return; }
       prepareRecorder().then(function () {
-        recChunks = []; recFrames = 0; recRate = AC.sampleRate;
+        recChunks = []; recFrames = 0; recRate = AC.sampleRate; recPeak = 0; recClipped = 0;
         if (recNode.port) recNode.port.postMessage({ cmd: "start" });
         recOn = true;
         updateRecUi();
@@ -1654,7 +1669,11 @@ canvas.matchpic { height: 90px; width: 100%; image-rendering: pixelated; margin-
     var rec = { name: takeName(created), created: created.getTime(), dur: frames / recRate, rate: recRate, size: wav.size, blob: wav };
     recChunks = []; recFrames = 0;
     $("recTime").textContent = fmtTime(rec.dur);
-    takeAdd(rec).then(function () { setRecStatus("Saved " + rec.name); renderTakes(); });
+    var pk = recPeak > 0 ? Math.round(20 * Math.log(recPeak / 32768) / Math.LN10 * 10) / 10 : -99;
+    var msg = "Saved " + rec.name + ". Loudest point " + pk + " dB.";
+    if (recClipped > 20) msg += " It hit the top (" + recClipped + " samples), so it will sound harsh. Turn the S-1 volume or the Recording level down and record again.";
+    else if (pk < -30) msg += " Very quiet. Turn the S-1 volume or the Recording level up.";
+    takeAdd(rec).then(function () { setRecStatus(msg); renderTakes(); });
   }
 
   // ---------- Takes list ----------
@@ -1748,6 +1767,10 @@ canvas.matchpic { height: 90px; width: 100%; image-rendering: pixelated; margin-
 
   function initRec() {
     $("btnRec").addEventListener("click", function () { if (recOn) stopRecording(); else startRecording(); });
+    $("recGain").addEventListener("input", function () {
+      $("recGainV").textContent = this.value + "%";
+      if (recGainNode) recGainNode.gain.value = this.value / 100;
+    });
     renderTakes();
     document.addEventListener("visibilitychange", function () {
       if (!document.hidden && recOn && navigator.wakeLock) {
